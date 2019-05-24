@@ -1,0 +1,68 @@
+-- with sector
+SELECT A.BxID as BxID, A.Strategy as Strategy, A.CurrentBoxName as BoxName, A.SizeType as SizeType, A.bxType as BoxType, A.nws as News, A.erng as Earnings, A.rtng as Ratings, A.st as StrategyType, A.side as Side, A.trader as Trader, 
+
+ROUND(A.LGross,0) as LGross, ROUND(B.BTGross,0) as BTGross, ROUND((A.LGross-B.BTGross),0) AS GrossDiff,
+CASE B.BTGross WHEN 0 THEN 0 ELSE ROUND(((A.LGross*1.00001)/(B.BTGross*1.00001)),2) END AS GrossPrc, 
+
+A.LShares as LShares, B.BTShares as BTShares, (A.LShares-B.BTShares) AS VolDiff, 
+CASE B.BTShares WHEN 0 THEN 0 ELSE ROUND(((A.LShares*1.00001)/(B.BTShares*1.00001)),2) END AS VolPrc, 
+
+A.LCPS as LCPS,  B.BTCPS as BTCPS, ROUND(A.LCPS - B.BTCPS,1) AS CPSDiff, 
+
+CASE 
+    WHEN A.LShares < 4000 AND B.BTShares < 4000 THEN 0
+    
+    WHEN A.LShares > 4000 AND A.LGross < 0.75 * B.BTGross AND A.LGross < 0 THEN 4 
+    
+    WHEN A.LShares > 4000 OR B.BTShares > 4000 AND A.LGross < 0.75 * B.BTGross AND A.LGross > 0 AND B.BTGross > 0 THEN 3
+
+    WHEN A.LShares > 4000 OR B.BTShares > 4000 AND A.LGross < 0.75 * B.BTGross AND A.LGross <= 0 THEN 2
+    
+    WHEN A.LShares > 4000 OR B.BTShares > 4000 AND A.LGross >= 0.75 * B.BTGross AND A.LGross > 0 THEN 1
+    
+    ELSE 0
+END AS Sector
+
+FROM
+  (SELECT LV.BoxID AS BxID
+      , Strategies.Strategy AS Strategy
+      , LV.VersionName AS CurrentBoxName
+      , LV.SizeType
+      , LV.Size AS size
+      , BoxType.Type AS bxType
+      , Boxes.News AS nws
+      , Boxes.Earnings AS erng
+      , Boxes.Ratings AS rtng
+      , StrategyTypes.Type as st
+      , Sides.Side as side
+      , Traders.NAME as trader
+      , SUM(Gross) AS LGross
+      , SUM(Shares) AS LShares
+      , CASE SUM(Shares) WHEN 0 THEN 0 ELSE ROUND((SUM(Gross) / SUM(Shares)) * 100,1) END AS LCPS
+    FROM PrimusRuns AS LPR
+    JOIN BoxVersions AS LV ON LPR.TransientName = LV.VersionName
+      JOIN Boxes ON Boxes.ID = LV.BoxID
+      JOIN BoxType ON Boxes.BoxType = BoxType.ID
+      JOIN StrategyTypes ON Boxes.StrategyType = StrategyTypes.ID
+      JOIN Sides ON Boxes.Side = Sides.ID
+      JOIN Traders ON Boxes.TraderID = Traders.ID
+      JOIN Strategies ON Boxes.StrategyID = Strategies.ID
+    WHERE RunType = 'Live'
+    --and TransientName LIKE "%PS%"
+    and DATE(RunDateStart) <= DATE('2018-12-31')
+    and DATE(RunDateStart) >= DATE('2017-01-01')
+    GROUP BY LV.BoxID
+    ORDER BY LPR.RunDateStart DESC) AS A
+,
+  (SELECT BV.BoxID AS BxID
+      , SUM(Gross) AS BTGross
+      , SUM(Shares) AS BTShares
+      , CASE SUM(Shares) WHEN 0 THEN 0 ELSE ROUND((SUM(Gross) / SUM(Shares)) * 100,1) END AS BTCPS
+    FROM PrimusRuns AS BPR
+    JOIN BoxVersions AS BV ON BPR.TransientName = BV.VersionName
+    WHERE RunType = 'Backtesting'
+    --and TransientName LIKE "%PS%"
+    and DATE(TestDateStart) <= DATE('2018-12-31')
+    and DATE(TestDateStart) >= DATE('2017-01-01')
+    GROUP BY BV.BoxID) AS B
+WHERE A.BxID = B.BxID
